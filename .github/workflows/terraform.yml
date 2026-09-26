@@ -1,0 +1,107 @@
+name: Terraform
+
+# This repository holds nothing but infrastructure, so every commit is
+# relevant. In the application repository you would need a paths: filter
+# to stop front-end commits running terraform plan.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write      # needed to post the plan as a comment
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  AWS_REGION: us-east-1
+  # The pipeline has no terraform.tfvars - it is gitignored. Every variable
+  # arrives as TF_VAR_<name> instead.
+  TF_VAR_key_name: devops-key
+  TF_VAR_my_ip_cidr: 0.0.0.0/32
+  TF_VAR_aws_account_id: ${{ secrets.AWS_ACCOUNT_ID }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: envs/staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+
+      - name: Format check
+        run: terraform fmt -check -recursive ../..
+
+      - name: Init
+        run: terraform init -input=false
+
+      - name: Validate
+        run: terraform validate
+
+      - name: Plan
+        id: plan
+        run: |
+          terraform plan -input=false -no-color -out=tfplan | tee plan.txt
+          echo "summary=$(grep -E '^(Plan:|No changes)' plan.txt | tail -1)" >> $GITHUB_OUTPUT
+
+      - name: Comment the plan on the pull request
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('envs/staging/plan.txt', 'utf8');
+            const body = `### Terraform plan - envs/staging
+
+**${{ steps.plan.outputs.summary }}**
+
+<details><summary>Full plan</summary>
+
+\`\`\`
+${plan.slice(0, 60000)}
+\`\`\`
+
+</details>`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body,
+            });
+
+      - name: Upload the plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan
+          path: envs/staging/tfplan
+
+  apply:
+    needs: plan
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: staging          # add a required reviewer here for real work
+    defaults:
+      run:
+        working-directory: envs/staging
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.9
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+          path: envs/staging
+
+      - run: terraform init -input=false
+
+      # Applies the plan a human reviewed, byte for byte - not a fresh one.
+      - run: terraform apply -input=false tfplan

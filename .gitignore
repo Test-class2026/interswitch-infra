@@ -1,0 +1,18 @@
+# Provider plugins - re-downloaded by terraform init
+.terraform/
+
+# State, and anything derived from it. State holds every attribute of every
+# resource, including values you would not want in a repository.
+*.tfstate
+*.tfstate.*
+
+# Your values: account ID, key pair name, home IP
+terraform.tfvars
+*.tfvars.json
+
+# Saved plans and their rendered output
+tfplan
+plan.txt
+
+crash.log
+crash.*.log
