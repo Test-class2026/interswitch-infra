@@ -6,7 +6,7 @@ module "k3s" {
   name          = "interswitch-k3s-staging"
   environment   = "staging"
   instance_type = "t3.small"
-  volume_size   = 20
+  volume_size   = 25
   key_name      = var.key_name
   my_ip_cidr    = var.my_ip_cidr
 }
